@@ -1,0 +1,274 @@
+"""
+Cycle Management API Routes.
+
+Handles creation, listing, and retrieval of collection/summarization cycles.
+"""
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, func, desc
+from typing import List
+from datetime import datetime
+import logging
+
+from ..database import get_db
+from ..models import Cycle, CollectedData, Summary
+from ..models.cycle import CycleStatus
+from ..schemas import (
+    CycleCreate,
+    CycleResponse,
+    CycleListResponse,
+    CycleDetailResponse,
+    CollectedDataSummary,
+    SummarySummary,
+)
+from ..services.collection_orchestrator import CollectionOrchestrator
+from ..services.summary_service import SummaryService
+
+router = APIRouter()
+logger = logging.getLogger(__name__)
+
+
+@router.post("/", response_model=CycleResponse, status_code=201)
+async def create_cycle(
+    cycle_data: CycleCreate,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Create and execute a new collection + summarization cycle.
+
+    This endpoint:
+    1. Creates a cycle record
+    2. Collects data from specified sources (async)
+    3. Generates AI summary
+    4. Stores everything in database
+
+    The cycle runs asynchronously - check status via GET /cycles/{id}
+    """
+    logger.info(f"Creating new cycle: {cycle_data.name}")
+
+    # Create cycle record
+    cycle = Cycle(
+        name=cycle_data.name,
+        status=CycleStatus.PENDING,
+        config_snapshot={
+            "sources": [s.model_dump() for s in cycle_data.sources],
+            "timeframe_days": cycle_data.timeframe_days,
+            "llm_provider": cycle_data.llm_provider,
+            "llm_model": cycle_data.llm_model,
+            "custom_prompt": cycle_data.custom_prompt,
+        },
+    )
+
+    db.add(cycle)
+    await db.commit()
+    await db.refresh(cycle)
+
+    # Execute collection and summarization in background
+    # Note: In production, use Celery/background tasks instead of inline execution
+    try:
+        await _execute_cycle(cycle.id, cycle_data, db)
+    except Exception as e:
+        logger.error(f"Cycle execution failed: {e}", exc_info=True)
+        cycle.status = CycleStatus.FAILED
+        cycle.error_message = str(e)
+        cycle.completed_at = datetime.now()
+        await db.commit()
+        await db.refresh(cycle)
+
+    return CycleResponse.model_validate(cycle)
+
+
+async def _execute_cycle(
+    cycle_id,
+    cycle_data: CycleCreate,
+    db: AsyncSession,
+):
+    """Execute collection and summarization for a cycle."""
+    # Update status to collecting
+    result = await db.execute(select(Cycle).where(Cycle.id == cycle_id))
+    cycle = result.scalar_one()
+    cycle.status = CycleStatus.COLLECTING
+    cycle.started_at = datetime.now()
+    await db.commit()
+
+    # Collect data from all sources
+    orchestrator = CollectionOrchestrator()
+
+    sources_config = [
+        {
+            "source_type": s.source_type,
+            "credential_ref": s.credential_ref,
+            "collect_spec": s.collect_spec,
+        }
+        for s in cycle_data.sources
+    ]
+
+    collected_results = await orchestrator.collect_multiple(sources_config, cycle_data.timeframe_days)
+
+    # Store collected data
+    for result in collected_results:
+        if result.get("error"):
+            logger.warning(f"Collection failed for {result.get('source_type')}: {result.get('error')}")
+            continue
+
+        collected_data = CollectedData(
+            cycle_id=cycle_id,
+            source_type=result["metadata"]["source_type"],
+            source_name=result["source_info"].get("subreddits") or result["source_info"].get("channels") or "unknown",
+            data=result["data"],
+            data_size_bytes=len(str(result["data"])),
+            item_count=result["item_count"],
+            collection_time_ms=result["metadata"]["collection_time_ms"],
+        )
+        db.add(collected_data)
+
+    await db.commit()
+
+    # Update status to summarizing
+    cycle.status = CycleStatus.SUMMARIZING
+    await db.commit()
+
+    # Generate summary
+    summary_service = SummaryService(
+        llm_provider=cycle_data.llm_provider,
+        model=cycle_data.llm_model,
+    )
+
+    summary_result = await summary_service.summarize(
+        collected_data=collected_results,
+        custom_prompt=cycle_data.custom_prompt,
+    )
+
+    # Store summary
+    summary = Summary(
+        cycle_id=cycle_id,
+        summary_text=summary_result["summary_text"],
+        summary_word_count=summary_result["summary_word_count"],
+        llm_provider=summary_result["llm_provider"],
+        model_name=summary_result["model_name"],
+        input_tokens=summary_result["input_tokens"],
+        output_tokens=summary_result["output_tokens"],
+        cost_usd=summary_result["cost_usd"],
+        generation_time_ms=summary_result["generation_time_ms"],
+    )
+    db.add(summary)
+
+    # Update cycle to completed
+    cycle.status = CycleStatus.COMPLETED
+    cycle.completed_at = datetime.now()
+    await db.commit()
+
+    logger.info(f"Cycle {cycle_id} completed successfully")
+
+
+@router.get("/", response_model=CycleListResponse)
+async def list_cycles(
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(20, ge=1, le=100, description="Items per page"),
+    status: str = Query(None, description="Filter by status"),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    List all cycles with pagination.
+
+    Query parameters:
+    - page: Page number (default: 1)
+    - page_size: Items per page (default: 20, max: 100)
+    - status: Filter by status (pending, collecting, summarizing, completed, failed)
+    """
+    # Build query
+    query = select(Cycle)
+
+    if status:
+        query = query.where(Cycle.status == status)
+
+    # Get total count
+    count_query = select(func.count()).select_from(query.subquery())
+    total_result = await db.execute(count_query)
+    total = total_result.scalar()
+
+    # Get paginated results
+    query = query.order_by(desc(Cycle.created_at))
+    query = query.offset((page - 1) * page_size).limit(page_size)
+
+    result = await db.execute(query)
+    cycles = result.scalars().all()
+
+    return CycleListResponse(
+        cycles=[CycleResponse.model_validate(c) for c in cycles],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.get("/{cycle_id}", response_model=CycleDetailResponse)
+async def get_cycle(
+    cycle_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Get detailed information about a specific cycle.
+
+    Includes:
+    - Cycle metadata
+    - Collected data summary
+    - Full summary text
+    """
+    # Get cycle
+    result = await db.execute(select(Cycle).where(Cycle.id == cycle_id))
+    cycle = result.scalar_one_or_none()
+
+    if not cycle:
+        raise HTTPException(status_code=404, detail="Cycle not found")
+
+    # Get collected data
+    result = await db.execute(
+        select(CollectedData).where(CollectedData.cycle_id == cycle_id)
+    )
+    collected_data = result.scalars().all()
+
+    # Get summary
+    result = await db.execute(
+        select(Summary).where(Summary.cycle_id == cycle_id)
+    )
+    summary = result.scalar_one_or_none()
+
+    # Build response
+    return CycleDetailResponse(
+        cycle=CycleResponse.model_validate(cycle),
+        collected_data=[
+            CollectedDataSummary(
+                source_type=cd.source_type,
+                source_name=cd.source_name,
+                item_count=cd.item_count,
+                data_size_bytes=cd.data_size_bytes,
+                collection_time_ms=cd.collection_time_ms,
+            )
+            for cd in collected_data
+        ],
+        summary=SummarySummary.model_validate(summary) if summary else None,
+        summary_text=summary.summary_text if summary else None,
+    )
+
+
+@router.delete("/{cycle_id}", status_code=204)
+async def delete_cycle(
+    cycle_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Delete a cycle and all associated data.
+
+    This cascades to collected_data and summaries tables.
+    """
+    result = await db.execute(select(Cycle).where(Cycle.id == cycle_id))
+    cycle = result.scalar_one_or_none()
+
+    if not cycle:
+        raise HTTPException(status_code=404, detail="Cycle not found")
+
+    await db.delete(cycle)
+    await db.commit()
+
+    logger.info(f"Deleted cycle {cycle_id}")

@@ -1,0 +1,66 @@
+"""
+Daigest FastAPI Application
+Orchestrates data collection from multiple sources and generates AI summaries.
+"""
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+app = FastAPI(
+    title="Daigest API",
+    description="Multi-source data collection and AI summarization platform",
+    version="2.0.0",
+)
+
+# CORS middleware (adjust origins for production)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3001"],  # React dev server
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize database and services on startup."""
+    logger.info("Daigest API starting up...")
+    from src.database import init_db
+    logger.info("Initializing database tables...")
+    await init_db()
+    logger.info("Database initialization complete")
+
+
+@app.get("/")
+async def root():
+    """Health check endpoint."""
+    return {
+        "status": "ok",
+        "service": "Daigest API",
+        "version": "2.0.0",
+    }
+
+
+@app.get("/health")
+async def health_check():
+    """Detailed health check."""
+    return {
+        "status": "healthy",
+        "database": "connected",  # TODO: Add real DB check
+        "services": {
+            "collectors": "ready",
+            "summarizer": "ready",
+        },
+    }
+
+
+# Register API routes
+from .routes import cycle_router, config_router
+
+app.include_router(cycle_router, prefix="/api/cycles", tags=["Cycles"])
+app.include_router(config_router, prefix="/api/configs", tags=["Configurations"])

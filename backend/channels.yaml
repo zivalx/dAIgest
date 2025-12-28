@@ -1,0 +1,51 @@
+# YouTube Digest Configuration
+# This file defines which YouTube channels to monitor and digest
+
+# Global settings
+settings:
+  max_videos_per_channel: 5
+  days_back: 7
+  use_whisper: true
+  whisper_model: "base"  # Options: tiny, base, small, medium, large
+  output_dir: "output"
+
+# Channels to monitor
+channels:
+  - name: "Veritasium"
+    enabled: true
+    max_videos: 3
+
+  - name: "ThePrimeagen"
+    enabled: true
+    max_videos: 5
+
+  - name: "Fireship"
+    enabled: true
+    max_videos: 5
+
+# LLM summarization settings
+llm:
+  provider: "openai"  # Options: openai, anthropic
+  model: "gpt-4o-mini"  # Options: gpt-4o, gpt-4o-mini, gpt-3.5-turbo
+  max_tokens: 2000
+  temperature: 0.3
+
+  # Summary prompt template
+  prompt_template: |
+    You are a helpful assistant that creates concise summaries of YouTube video transcripts.
+
+    Below are transcripts from multiple YouTube videos. Create a comprehensive digest that:
+    1. Summarizes the key points from each video
+    2. Identifies common themes across videos
+    3. Highlights any important insights or takeaways
+    4. Uses clear, concise language
+
+    Format the output as markdown with:
+    - A brief overview section
+    - Individual video summaries
+    - Key themes and insights
+
+    Transcripts:
+    {transcripts}
+
+    Please provide the digest summary:

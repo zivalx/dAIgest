@@ -1,0 +1,31 @@
+# FastAPI and web server
+fastapi>=0.104.0
+uvicorn>=0.24.0
+
+# Database
+asyncpg>=0.29.0
+sqlalchemy>=2.0.0
+alembic>=1.12.0
+aiosqlite>=0.19.0  # For SQLite async support (dev/testing)
+
+# Data validation
+pydantic>=2.4.0
+
+# Connectors library (external data collection)
+connectors[all]>=0.1.0
+
+# LLM dependencies
+langchain>=0.1.0
+langchain-openai>=0.0.2
+langchain-anthropic>=0.1.0  # Optional: for Claude support
+
+# Config and environment
+pyyaml>=6.0.0
+python-dotenv>=1.0.0
+
+# Testing dependencies
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-cov>=4.1.0
+pytest-mock>=3.11.0
+httpx>=0.24.0  # For testing FastAPI endpoints
