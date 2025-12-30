@@ -36,6 +36,14 @@ const SOURCE_COLORS = {
 };
 
 export default function DigestCard({ digest, onClick }) {
+  // Debug logging
+  console.log('🎴 DigestCard rendering:', {
+    name: digest.name,
+    summary_text: digest.summary_text?.substring(0, 50) + '...',
+    item_count: digest.item_count,
+    sources: digest.config_snapshot?.sources?.length || 0,
+  });
+
   const formatTimeAgo = (date) => {
     const now = new Date();
     const past = new Date(date);

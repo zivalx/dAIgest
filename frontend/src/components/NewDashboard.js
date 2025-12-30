@@ -43,9 +43,11 @@ export default function NewDashboard() {
     setLoading(true);
     try {
       const response = await apiService.listCycles(1, 20);
+      console.log('📊 Dashboard: Loaded cycles from API:', response);
+      console.log('📊 Dashboard: First cycle data:', response.cycles?.[0]);
       setCycles(response.cycles || []);
     } catch (error) {
-      console.error('Failed to load cycles:', error);
+      console.error('❌ Failed to load cycles:', error);
     } finally {
       setLoading(false);
     }
@@ -63,6 +65,11 @@ export default function NewDashboard() {
     setSelectedCycleId(null);
   };
 
+  const handleViewChange = (view) => {
+    setActiveView(view);
+    setSelectedCycleId(null); // Clear selected cycle when changing views
+  };
+
   const filteredCycles = cycles.filter((cycle) =>
     cycle.name?.toLowerCase().includes(searchQuery.toLowerCase())
   );
@@ -72,7 +79,7 @@ export default function NewDashboard() {
   // Render content based on active view and selected cycle
   const renderContent = () => {
     if (selectedCycleId) {
-      return <SummaryViewer cycleId={selectedCycleId} onBack={handleBackToCycles} />;
+      return <SummaryViewer cycleId={selectedCycleId} onBack={handleBackToCycles} onDelete={loadCycles} />;
     }
 
     if (activeView === 'all-digests') {
@@ -216,7 +223,7 @@ export default function NewDashboard() {
       {/* Sidebar */}
       <Sidebar
         activeView={activeView}
-        onViewChange={setActiveView}
+        onViewChange={handleViewChange}
         onCreateClick={handleCreateClick}
       />
 
