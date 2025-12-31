@@ -57,6 +57,7 @@ class CollectedDataSummary(BaseModel):
     item_count: int
     data_size_bytes: Optional[int]
     collection_time_ms: Optional[int]
+    data: Optional[List[Dict[str, Any]]] = None  # Raw collected data
 
 
 class SummarySummary(BaseModel):

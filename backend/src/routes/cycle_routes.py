@@ -344,6 +344,7 @@ async def get_cycle(
                 item_count=cd.item_count,
                 data_size_bytes=cd.data_size_bytes,
                 collection_time_ms=cd.collection_time_ms,
+                data=cd.data,  # Include raw collected data
             )
             for cd in collected_data
         ],
