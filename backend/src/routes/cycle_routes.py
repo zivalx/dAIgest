@@ -28,6 +28,26 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
+def serialize_for_json(obj):
+    """
+    Recursively convert datetime objects to ISO format strings for JSON serialization.
+
+    Args:
+        obj: Any object (dict, list, datetime, or primitive)
+
+    Returns:
+        JSON-serializable version of the object
+    """
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    elif isinstance(obj, dict):
+        return {key: serialize_for_json(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [serialize_for_json(item) for item in obj]
+    else:
+        return obj
+
+
 @router.post("/", response_model=CycleResponse, status_code=201)
 async def create_cycle(
     cycle_data: CycleCreate,
@@ -69,6 +89,12 @@ async def create_cycle(
         await _execute_cycle(cycle.id, cycle_data, db)
     except Exception as e:
         logger.error(f"Cycle execution failed: {e}", exc_info=True)
+        # Rollback any pending transaction to clean session state
+        await db.rollback()
+        # Fetch fresh cycle instance
+        result = await db.execute(select(Cycle).where(Cycle.id == cycle.id))
+        cycle = result.scalar_one()
+        # Update to failed status
         cycle.status = CycleStatus.FAILED
         cycle.error_message = str(e)
         cycle.completed_at = datetime.now()
@@ -128,12 +154,20 @@ async def _execute_cycle(
             f"Cycle {cycle_id}: Collection from {source_type} succeeded - {item_count} items collected"
         )
 
+        # Serialize datetime objects to ISO strings for JSON storage
+        serialized_data = serialize_for_json(result["data"])
+
+        # Get source name (convert list to comma-separated string if needed)
+        source_name = result["source_info"].get("subreddits") or result["source_info"].get("channels") or "unknown"
+        if isinstance(source_name, list):
+            source_name = ", ".join(source_name)
+
         collected_data = CollectedData(
             cycle_id=cycle_id,
             source_type=source_type,
-            source_name=result["source_info"].get("subreddits") or result["source_info"].get("channels") or "unknown",
-            data=result["data"],
-            data_size_bytes=len(str(result["data"])),
+            source_name=source_name,
+            data=serialized_data,
+            data_size_bytes=len(str(serialized_data)),
             item_count=item_count,
             collection_time_ms=result["metadata"]["collection_time_ms"],
         )
