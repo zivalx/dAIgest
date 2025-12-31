@@ -43,11 +43,11 @@ export default function NewDashboard() {
     setLoading(true);
     try {
       const response = await apiService.listCycles(1, 20);
-      console.log('📊 Dashboard: Loaded cycles from API:', response);
-      console.log('📊 Dashboard: First cycle data:', response.cycles?.[0]);
+      console.log('Dashboard: Loaded cycles from API:', response);
+      console.log('Dashboard: First cycle data:', response.cycles?.[0]);
       setCycles(response.cycles || []);
     } catch (error) {
-      console.error('❌ Failed to load cycles:', error);
+      console.error('Failed to load cycles:', error);
     } finally {
       setLoading(false);
     }
@@ -179,7 +179,7 @@ export default function NewDashboard() {
                 }}
               >
                 <Typography variant="h6" color="text.secondary" gutterBottom>
-                  🔮 No digests yet
+                  No digests yet
                 </Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
                   Create your first AI-powered digest to get started
@@ -203,7 +203,7 @@ export default function NewDashboard() {
             ) : (
               <Grid container spacing={3}>
                 {recentDigests.map((cycle) => (
-                  <Grid item xs={12} md={6} lg={4} key={cycle.id}>
+                  <Grid item xs={12} md={6} lg={4} key={cycle.id} sx={{ display: 'flex' }}>
                     <DigestCard
                       digest={cycle}
                       onClick={() => handleCycleClick(cycle.id)}

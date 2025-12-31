@@ -283,7 +283,9 @@ Format your summary with:
         """Format Telegram messages for summarization."""
         lines = []
         for msg in messages[:100]:  # Limit to 100 messages
-            lines.append(f"\n[{msg.get('channel', 'unknown')}] {msg.get('text', 'No text')[:200]}")
+            text = msg.get('text') or 'No text'  # Handle None values
+            channel = msg.get('channel', 'unknown')
+            lines.append(f"\n[{channel}] {text[:200]}")
         return "\n".join(lines)
 
     def _format_gnews_data(self, articles: List[Dict]) -> str:
