@@ -66,10 +66,12 @@ export default function DigestCard({ digest, onClick }) {
       sx={{
         cursor: 'pointer',
         transition: 'all 0.3s ease',
-        width: '100%',
-        height: 400,
-        minHeight: 400,
-        maxHeight: 400,
+        width: { xs: 280, sm: 320, md: 360, lg: 400 },
+        height: { xs: 280, sm: 320, md: 360, lg: 400 },
+        minWidth: { xs: 280, sm: 320, md: 360, lg: 400 },
+        minHeight: { xs: 280, sm: 320, md: 360, lg: 400 },
+        maxWidth: { xs: 280, sm: 320, md: 360, lg: 400 },
+        maxHeight: { xs: 280, sm: 320, md: 360, lg: 400 },
         display: 'flex',
         flexDirection: 'column',
         '&:hover': {
