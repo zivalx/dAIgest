@@ -28,6 +28,26 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
+def serialize_for_json(obj):
+    """
+    Recursively convert datetime objects to ISO format strings for JSON serialization.
+
+    Args:
+        obj: Any object (dict, list, datetime, or primitive)
+
+    Returns:
+        JSON-serializable version of the object
+    """
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    elif isinstance(obj, dict):
+        return {key: serialize_for_json(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [serialize_for_json(item) for item in obj]
+    else:
+        return obj
+
+
 @router.post("/", response_model=CycleResponse, status_code=201)
 async def create_cycle(
     cycle_data: CycleCreate,
@@ -69,6 +89,12 @@ async def create_cycle(
         await _execute_cycle(cycle.id, cycle_data, db)
     except Exception as e:
         logger.error(f"Cycle execution failed: {e}", exc_info=True)
+        # Rollback any pending transaction to clean session state
+        await db.rollback()
+        # Fetch fresh cycle instance
+        result = await db.execute(select(Cycle).where(Cycle.id == cycle.id))
+        cycle = result.scalar_one()
+        # Update to failed status
         cycle.status = CycleStatus.FAILED
         cycle.error_message = str(e)
         cycle.completed_at = datetime.now()
@@ -106,23 +132,66 @@ async def _execute_cycle(
     collected_results = await orchestrator.collect_multiple(sources_config, cycle_data.timeframe_days)
 
     # Store collected data
-    for result in collected_results:
+    successful_collections = 0
+    failed_collections = 0
+
+    for i, result in enumerate(collected_results):
         if result.get("error"):
-            logger.warning(f"Collection failed for {result.get('source_type')}: {result.get('error')}")
+            failed_collections += 1
+            source_type = result.get('source_type', 'unknown')
+            error = result.get('error')
+            logger.error(
+                f"Cycle {cycle_id}: Collection from {source_type} FAILED\n"
+                f"  Error: {error}\n"
+                f"  Source config: {cycle_data.sources[i].collect_spec if i < len(cycle_data.sources) else 'N/A'}"
+            )
             continue
+
+        successful_collections += 1
+        source_type = result["metadata"]["source_type"]
+        item_count = result["item_count"]
+        logger.info(
+            f"Cycle {cycle_id}: Collection from {source_type} succeeded - {item_count} items collected"
+        )
+
+        # Serialize datetime objects to ISO strings for JSON storage
+        serialized_data = serialize_for_json(result["data"])
+
+        # Get source name (convert list to comma-separated string if needed)
+        source_name = result["source_info"].get("subreddits") or result["source_info"].get("channels") or "unknown"
+        if isinstance(source_name, list):
+            source_name = ", ".join(source_name)
 
         collected_data = CollectedData(
             cycle_id=cycle_id,
-            source_type=result["metadata"]["source_type"],
-            source_name=result["source_info"].get("subreddits") or result["source_info"].get("channels") or "unknown",
-            data=result["data"],
-            data_size_bytes=len(str(result["data"])),
-            item_count=result["item_count"],
+            source_type=source_type,
+            source_name=source_name,
+            data=serialized_data,
+            data_size_bytes=len(str(serialized_data)),
+            item_count=item_count,
             collection_time_ms=result["metadata"]["collection_time_ms"],
         )
         db.add(collected_data)
 
+    logger.info(
+        f"Cycle {cycle_id}: Collection summary - "
+        f"{successful_collections} succeeded, {failed_collections} failed"
+    )
+
     await db.commit()
+
+    # Check if any data was collected
+    total_items = sum(r.get("item_count", 0) for r in collected_results if not r.get("error"))
+
+    if total_items == 0:
+        logger.warning(f"Cycle {cycle_id}: No data collected from any source. Skipping summarization.")
+        cycle.status = CycleStatus.FAILED
+        cycle.error_message = "No data collected from any source. Check collection logs and source configurations."
+        cycle.completed_at = datetime.now()
+        await db.commit()
+        return
+
+    logger.info(f"Cycle {cycle_id}: Collected {total_items} items total. Proceeding to summarization.")
 
     # Update status to summarizing
     cycle.status = CycleStatus.SUMMARIZING
@@ -158,7 +227,7 @@ async def _execute_cycle(
     cycle.completed_at = datetime.now()
     await db.commit()
 
-    logger.info(f"Cycle {cycle_id} completed successfully")
+    logger.info(f"Cycle {cycle_id} completed successfully with {total_items} items")
 
 
 @router.get("/", response_model=CycleListResponse)
@@ -194,8 +263,39 @@ async def list_cycles(
     result = await db.execute(query)
     cycles = result.scalars().all()
 
+    # Enrich cycles with summary and item count
+    enriched_cycles = []
+    for cycle in cycles:
+        # Get summary for this cycle
+        summary_result = await db.execute(
+            select(Summary).where(Summary.cycle_id == cycle.id)
+        )
+        summary = summary_result.scalar_one_or_none()
+
+        # Get total item count from collected data
+        item_count_result = await db.execute(
+            select(func.sum(CollectedData.item_count))
+            .where(CollectedData.cycle_id == cycle.id)
+        )
+        total_items = item_count_result.scalar() or 0
+
+        # Create response with enriched data
+        cycle_dict = {
+            "id": cycle.id,
+            "name": cycle.name,
+            "status": cycle.status,
+            "created_at": cycle.created_at,
+            "started_at": cycle.started_at,
+            "completed_at": cycle.completed_at,
+            "error_message": cycle.error_message,
+            "config_snapshot": cycle.config_snapshot,
+            "summary_text": summary.summary_text if summary else None,
+            "item_count": total_items,
+        }
+        enriched_cycles.append(CycleResponse(**cycle_dict))
+
     return CycleListResponse(
-        cycles=[CycleResponse.model_validate(c) for c in cycles],
+        cycles=enriched_cycles,
         total=total,
         page=page,
         page_size=page_size,
@@ -244,6 +344,7 @@ async def get_cycle(
                 item_count=cd.item_count,
                 data_size_bytes=cd.data_size_bytes,
                 collection_time_ms=cd.collection_time_ms,
+                data=cd.data,  # Include raw collected data
             )
             for cd in collected_data
         ],

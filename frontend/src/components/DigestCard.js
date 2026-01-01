@@ -15,15 +15,21 @@ import {
 import {
   Schedule as ScheduleIcon,
   Article as ArticleIcon,
+  Telegram as TelegramIcon,
+  YouTube as YouTubeIcon,
+  Twitter as TwitterIcon,
+  Reddit as RedditIcon,
+  RssFeed as RssIcon,
+  TrendingUp as TrendingIcon,
 } from '@mui/icons-material';
 
 const SOURCE_ICONS = {
-  reddit: '🔴',
-  twitter: '🐦',
-  youtube: '▶️',
-  telegram: '✈️',
-  gnews: '📰',
-  pytrends: '📈',
+  telegram: TelegramIcon,
+  youtube: YouTubeIcon,
+  twitter: TwitterIcon,
+  reddit: RedditIcon,
+  gnews: RssIcon,
+  pytrends: TrendingIcon,
 };
 
 const SOURCE_COLORS = {
@@ -36,6 +42,9 @@ const SOURCE_COLORS = {
 };
 
 export default function DigestCard({ digest, onClick }) {
+  // Extract sources from config snapshot
+  const sources = digest.config_snapshot?.sources || [];
+
   const formatTimeAgo = (date) => {
     const now = new Date();
     const past = new Date(date);
@@ -49,8 +58,6 @@ export default function DigestCard({ digest, onClick }) {
     return `Last run ${diffDays} days ago`;
   };
 
-  // Extract sources from config snapshot
-  const sources = digest.config_snapshot?.sources || [];
   const frequency = digest.config_snapshot?.timeframe_days === 1 ? 'Daily' : 'Weekly';
 
   return (
@@ -59,13 +66,28 @@ export default function DigestCard({ digest, onClick }) {
       sx={{
         cursor: 'pointer',
         transition: 'all 0.3s ease',
+        width: { xs: 280, sm: 320, md: 360, lg: 400 },
+        height: { xs: 280, sm: 320, md: 360, lg: 400 },
+        minWidth: { xs: 280, sm: 320, md: 360, lg: 400 },
+        minHeight: { xs: 280, sm: 320, md: 360, lg: 400 },
+        maxWidth: { xs: 280, sm: 320, md: 360, lg: 400 },
+        maxHeight: { xs: 280, sm: 320, md: 360, lg: 400 },
+        display: 'flex',
+        flexDirection: 'column',
         '&:hover': {
           transform: 'translateY(-2px)',
         },
       }}
     >
-      <CardContent sx={{ p: 3 }}>
-        {/* Header */}
+      <CardContent sx={{
+        p: 3,
+        height: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
+        '&:last-child': { pb: 3 }
+      }}>
+        {/* Header with Title, Chip & Source Icons */}
         <Box sx={{ mb: 2 }}>
           <Typography
             variant="h6"
@@ -73,11 +95,16 @@ export default function DigestCard({ digest, onClick }) {
               fontWeight: 600,
               mb: 1,
               color: 'white',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
             }}
           >
             {digest.name || 'Unnamed Digest'}
           </Typography>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+
+          {/* Frequency Chip and Time */}
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1.5 }}>
             <Chip
               label={frequency}
               size="small"
@@ -95,58 +122,67 @@ export default function DigestCard({ digest, onClick }) {
               </Typography>
             </Box>
           </Box>
+
+          {/* Source Logos - directly under chip */}
+          {sources.length > 0 && (
+            <Box sx={{ display: 'flex', gap: 0.5, mt: 0.5 }}>
+              {sources.map((source, idx) => {
+                const IconComponent = SOURCE_ICONS[source.source_type];
+                return IconComponent ? (
+                  <Box
+                    key={idx}
+                    sx={{
+                      width: 28,
+                      height: 28,
+                      borderRadius: '50%',
+                      bgcolor: SOURCE_COLORS[source.source_type] || '#666',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <IconComponent sx={{ fontSize: 16, color: 'white' }} />
+                  </Box>
+                ) : null;
+              })}
+            </Box>
+          )}
         </Box>
 
-        {/* Source Icons */}
-        <Box sx={{ mb: 2 }}>
-          <AvatarGroup max={5} spacing={8}>
-            {sources.map((source, idx) => (
-              <Avatar
-                key={idx}
-                sx={{
-                  width: 32,
-                  height: 32,
-                  bgcolor: SOURCE_COLORS[source.source_type] || '#666',
-                  fontSize: '1rem',
-                  border: '2px solid #1A1A1A',
-                }}
-              >
-                {SOURCE_ICONS[source.source_type] || '📄'}
-              </Avatar>
-            ))}
-          </AvatarGroup>
-        </Box>
+        {/* Summary Section */}
+        <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, mb: 2 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 1 }}>
+            <ArticleIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
+            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 500 }}>
+              Latest Summary
+            </Typography>
+          </Box>
 
-        {/* Latest Summary Label */}
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 1 }}>
-          <ArticleIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
-          <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 500 }}>
-            Latest Summary
+          {/* Summary Preview with fixed line clamp */}
+          <Typography
+            variant="body2"
+            color="text.primary"
+            sx={{
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              display: '-webkit-box',
+              WebkitLineClamp: 5,
+              WebkitBoxOrient: 'vertical',
+              lineHeight: 1.5,
+              flex: 1,
+            }}
+          >
+            {digest.summary_text ||
+              'Summary will be generated once data collection is complete...'}
           </Typography>
         </Box>
 
-        {/* Summary Preview */}
-        <Typography
-          variant="body2"
-          color="text.primary"
-          sx={{
-            mb: 2,
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            display: '-webkit-box',
-            WebkitLineClamp: 3,
-            WebkitBoxOrient: 'vertical',
-            lineHeight: 1.6,
-          }}
-        >
-          {digest.summary_text ||
-            'Summary will be generated once data collection is complete...'}
-        </Typography>
-
-        {/* Footer */}
-        <Typography variant="caption" color="text.secondary">
-          {digest.item_count || 0} items collected
-        </Typography>
+        {/* Footer - always at bottom */}
+        <Box sx={{ pt: 2, borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+          <Typography variant="caption" color="text.secondary">
+            {digest.item_count || 0} items collected
+          </Typography>
+        </Box>
       </CardContent>
     </Card>
   );

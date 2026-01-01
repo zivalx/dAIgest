@@ -34,6 +34,9 @@ class CycleResponse(BaseModel):
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     error_message: Optional[str] = None
+    config_snapshot: Optional[Dict[str, Any]] = None
+    summary_text: Optional[str] = None
+    item_count: Optional[int] = None
 
     class Config:
         from_attributes = True
@@ -54,6 +57,7 @@ class CollectedDataSummary(BaseModel):
     item_count: int
     data_size_bytes: Optional[int]
     collection_time_ms: Optional[int]
+    data: Optional[List[Dict[str, Any]]] = None  # Raw collected data
 
 
 class SummarySummary(BaseModel):

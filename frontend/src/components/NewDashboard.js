@@ -43,6 +43,8 @@ export default function NewDashboard() {
     setLoading(true);
     try {
       const response = await apiService.listCycles(1, 20);
+      console.log('Dashboard: Loaded cycles from API:', response);
+      console.log('Dashboard: First cycle data:', response.cycles?.[0]);
       setCycles(response.cycles || []);
     } catch (error) {
       console.error('Failed to load cycles:', error);
@@ -63,6 +65,11 @@ export default function NewDashboard() {
     setSelectedCycleId(null);
   };
 
+  const handleViewChange = (view) => {
+    setActiveView(view);
+    setSelectedCycleId(null); // Clear selected cycle when changing views
+  };
+
   const filteredCycles = cycles.filter((cycle) =>
     cycle.name?.toLowerCase().includes(searchQuery.toLowerCase())
   );
@@ -72,7 +79,7 @@ export default function NewDashboard() {
   // Render content based on active view and selected cycle
   const renderContent = () => {
     if (selectedCycleId) {
-      return <SummaryViewer cycleId={selectedCycleId} onBack={handleBackToCycles} />;
+      return <SummaryViewer cycleId={selectedCycleId} onBack={handleBackToCycles} onDelete={loadCycles} />;
     }
 
     if (activeView === 'all-digests') {
@@ -172,7 +179,7 @@ export default function NewDashboard() {
                 }}
               >
                 <Typography variant="h6" color="text.secondary" gutterBottom>
-                  🔮 No digests yet
+                  No digests yet
                 </Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
                   Create your first AI-powered digest to get started
@@ -196,7 +203,7 @@ export default function NewDashboard() {
             ) : (
               <Grid container spacing={3}>
                 {recentDigests.map((cycle) => (
-                  <Grid item xs={12} md={6} lg={4} key={cycle.id}>
+                  <Grid item xs={12} md={6} lg={4} key={cycle.id} sx={{ display: 'flex' }}>
                     <DigestCard
                       digest={cycle}
                       onClick={() => handleCycleClick(cycle.id)}
@@ -216,7 +223,7 @@ export default function NewDashboard() {
       {/* Sidebar */}
       <Sidebar
         activeView={activeView}
-        onViewChange={setActiveView}
+        onViewChange={handleViewChange}
         onCreateClick={handleCreateClick}
       />
 

@@ -15,19 +15,28 @@ import {
   Grid,
   Card,
   CardContent,
+  Collapse,
+  IconButton,
 } from '@mui/material';
 import {
   ArrowBack as BackIcon,
   Timer as TimerIcon,
   Storage as StorageIcon,
   MonetizationOn as CostIcon,
+  Delete as DeleteIcon,
+  Download as DownloadIcon,
+  PictureAsPdf as PdfIcon,
+  ExpandMore as ExpandMoreIcon,
+  Code as CodeIcon,
 } from '@mui/icons-material';
 import apiService from '../api/apiService';
 
-export default function SummaryViewer({ cycleId, onBack }) {
+export default function SummaryViewer({ cycleId, onBack, onDelete }) {
   const [cycleData, setCycleData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+  const [showRawData, setShowRawData] = useState(false);
 
   useEffect(() => {
     loadCycleData();
@@ -45,6 +54,183 @@ export default function SummaryViewer({ cycleId, onBack }) {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleDelete = async () => {
+    if (!window.confirm('Are you sure you want to delete this digest? This action cannot be undone.')) {
+      return;
+    }
+
+    setDeleting(true);
+    try {
+      await apiService.deleteCycle(cycleId);
+      if (onDelete) {
+        await onDelete(); // Refresh the list
+      }
+      onBack(); // Go back to the list after deleting
+    } catch (err) {
+      alert('Failed to delete digest: ' + err.message);
+      setDeleting(false);
+    }
+  };
+
+  const handleExportText = () => {
+    if (!cycleData) return;
+
+    const { cycle, collected_data, summary, summary_text } = cycleData;
+
+    // Create text content
+    let content = `${cycle.name}\n`;
+    content += '='.repeat(cycle.name.length) + '\n\n';
+    content += `Status: ${cycle.status}\n`;
+    content += `Created: ${new Date(cycle.created_at).toLocaleString()}\n`;
+    if (cycle.completed_at) {
+      content += `Completed: ${new Date(cycle.completed_at).toLocaleString()}\n`;
+    }
+    content += '\n';
+
+    // Add collected data summary
+    content += 'COLLECTED DATA SUMMARY\n';
+    content += '----------------------\n\n';
+    collected_data.forEach(data => {
+      content += `${data.source_type.toUpperCase()}: ${data.source_name || 'N/A'}\n`;
+      content += `  Items: ${data.item_count}\n`;
+      if (data.data_size_bytes) {
+        content += `  Size: ${(data.data_size_bytes / 1024).toFixed(1)} KB\n`;
+      }
+      if (data.collection_time_ms) {
+        content += `  Time: ${(data.collection_time_ms / 1000).toFixed(1)}s\n`;
+      }
+      content += '\n';
+    });
+
+    // Add summary metadata
+    if (summary) {
+      content += 'SUMMARY METADATA\n';
+      content += '----------------\n\n';
+      content += `LLM Provider: ${summary.llm_provider} / ${summary.model_name}\n`;
+      content += `Cost: $${summary.cost_usd ? summary.cost_usd.toFixed(4) : 'N/A'}\n`;
+      content += `Tokens (in/out): ${summary.input_tokens || 'N/A'} / ${summary.output_tokens || 'N/A'}\n`;
+      content += `Generation Time: ${summary.generation_time_ms ? (summary.generation_time_ms / 1000).toFixed(1) : 'N/A'}s\n`;
+      content += `Word Count: ${summary.summary_word_count || 'N/A'} words\n\n`;
+    }
+
+    // Add summary text
+    content += 'AI SUMMARY\n';
+    content += '----------\n\n';
+    content += summary_text || 'No summary available';
+
+    // Create download
+    const blob = new Blob([content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${cycle.name || 'digest'}_${new Date().toISOString().split('T')[0]}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleExportPDF = async () => {
+    if (!cycleData) return;
+
+    // Dynamic import of jsPDF
+    const { jsPDF } = await import('jspdf');
+    const doc = new jsPDF();
+
+    const { cycle, collected_data, summary, summary_text } = cycleData;
+
+    let yPos = 20;
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const margin = 20;
+    const maxWidth = pageWidth - 2 * margin;
+
+    // Title
+    doc.setFontSize(18);
+    doc.setFont(undefined, 'bold');
+    doc.text(cycle.name || 'Unnamed Digest', margin, yPos);
+    yPos += 10;
+
+    // Metadata
+    doc.setFontSize(10);
+    doc.setFont(undefined, 'normal');
+    doc.text(`Status: ${cycle.status}`, margin, yPos);
+    yPos += 6;
+    doc.text(`Created: ${new Date(cycle.created_at).toLocaleString()}`, margin, yPos);
+    yPos += 6;
+    if (cycle.completed_at) {
+      doc.text(`Completed: ${new Date(cycle.completed_at).toLocaleString()}`, margin, yPos);
+      yPos += 6;
+    }
+    yPos += 5;
+
+    // Collected Data Summary
+    doc.setFontSize(14);
+    doc.setFont(undefined, 'bold');
+    doc.text('Collected Data Summary', margin, yPos);
+    yPos += 8;
+
+    doc.setFontSize(10);
+    doc.setFont(undefined, 'normal');
+    collected_data.forEach(data => {
+      const sourceText = `${data.source_type.toUpperCase()}: ${data.source_name || 'N/A'} - ${data.item_count} items`;
+      doc.text(sourceText, margin, yPos);
+      yPos += 6;
+
+      if (yPos > 270) {
+        doc.addPage();
+        yPos = 20;
+      }
+    });
+    yPos += 5;
+
+    // Summary Metadata
+    if (summary) {
+      doc.setFontSize(14);
+      doc.setFont(undefined, 'bold');
+      doc.text('Summary Metadata', margin, yPos);
+      yPos += 8;
+
+      doc.setFontSize(10);
+      doc.setFont(undefined, 'normal');
+      doc.text(`LLM: ${summary.llm_provider} / ${summary.model_name}`, margin, yPos);
+      yPos += 6;
+      doc.text(`Cost: $${summary.cost_usd ? summary.cost_usd.toFixed(4) : 'N/A'}`, margin, yPos);
+      yPos += 6;
+      doc.text(`Tokens: ${summary.input_tokens || 'N/A'} / ${summary.output_tokens || 'N/A'}`, margin, yPos);
+      yPos += 6;
+      doc.text(`Word Count: ${summary.summary_word_count || 'N/A'} words`, margin, yPos);
+      yPos += 10;
+    }
+
+    // AI Summary
+    if (yPos > 240) {
+      doc.addPage();
+      yPos = 20;
+    }
+
+    doc.setFontSize(14);
+    doc.setFont(undefined, 'bold');
+    doc.text('AI Summary', margin, yPos);
+    yPos += 8;
+
+    doc.setFontSize(10);
+    doc.setFont(undefined, 'normal');
+
+    // Split text into lines that fit the page width
+    const summaryLines = doc.splitTextToSize(summary_text || 'No summary available', maxWidth);
+    summaryLines.forEach(line => {
+      if (yPos > 280) {
+        doc.addPage();
+        yPos = 20;
+      }
+      doc.text(line, margin, yPos);
+      yPos += 6;
+    });
+
+    // Save PDF
+    doc.save(`${cycle.name || 'digest'}_${new Date().toISOString().split('T')[0]}.pdf`);
   };
 
   if (loading) {
@@ -67,9 +253,40 @@ export default function SummaryViewer({ cycleId, onBack }) {
 
   return (
     <Box>
-      <Button startIcon={<BackIcon />} onClick={onBack} sx={{ mb: 2 }}>
-        Back to Cycles
-      </Button>
+      {/* Header with action buttons */}
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+        <Button startIcon={<BackIcon />} onClick={onBack}>
+          Back to Daigests
+        </Button>
+
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          <Button
+            variant="outlined"
+            startIcon={<DownloadIcon />}
+            onClick={handleExportText}
+            sx={{ color: 'primary.main', borderColor: 'primary.main' }}
+          >
+            Export Text
+          </Button>
+          <Button
+            variant="outlined"
+            startIcon={<PdfIcon />}
+            onClick={handleExportPDF}
+            sx={{ color: 'primary.main', borderColor: 'primary.main' }}
+          >
+            Export PDF
+          </Button>
+          <Button
+            variant="outlined"
+            color="error"
+            startIcon={<DeleteIcon />}
+            onClick={handleDelete}
+            disabled={deleting}
+          >
+            {deleting ? 'Deleting...' : 'Delete'}
+          </Button>
+        </Box>
+      </Box>
 
       <Paper sx={{ p: 3, mb: 3 }}>
         <Typography variant="h4" gutterBottom>
@@ -213,6 +430,57 @@ export default function SummaryViewer({ cycleId, onBack }) {
             </Paper>
           </>
         )}
+
+        <Divider sx={{ my: 3 }} />
+
+        {/* Raw Collected Data Section */}
+        <Box>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+            <CodeIcon sx={{ color: 'text.secondary' }} />
+            <Typography variant="h6">
+              Raw Collected Data
+            </Typography>
+            <IconButton
+              onClick={() => setShowRawData(!showRawData)}
+              sx={{
+                transform: showRawData ? 'rotate(180deg)' : 'rotate(0deg)',
+                transition: 'transform 0.3s',
+              }}
+            >
+              <ExpandMoreIcon />
+            </IconButton>
+          </Box>
+
+          <Collapse in={showRawData}>
+            {collected_data.map((data, idx) => (
+              <Box key={idx} sx={{ mb: 2 }}>
+                <Typography variant="subtitle2" sx={{ mb: 1, color: 'primary.main' }}>
+                  {data.source_type.toUpperCase()}: {data.source_name || 'N/A'} ({data.item_count} items)
+                </Typography>
+                <Paper variant="outlined" sx={{ p: 2, bgcolor: '#1e1e1e', overflow: 'auto', maxHeight: 400 }}>
+                  <Typography
+                    component="pre"
+                    sx={{
+                      color: '#d4d4d4',
+                      fontSize: '0.75rem',
+                      fontFamily: 'monospace',
+                      whiteSpace: 'pre-wrap',
+                      wordWrap: 'break-word',
+                      margin: 0,
+                    }}
+                  >
+                    {JSON.stringify(data.data || {}, null, 2)}
+                  </Typography>
+                </Paper>
+              </Box>
+            ))}
+            {collected_data.length === 0 && (
+              <Alert severity="warning">
+                No data was collected. Check collection logs for errors.
+              </Alert>
+            )}
+          </Collapse>
+        </Box>
       </Paper>
     </Box>
   );
